@@ -1,0 +1,75 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: the slimmed down reporting leech
+
+Parameters:
+ BucketName:
+   Type: String
+   Description: the name to be assigned to the asset bucket, leave blank to generate one
+   Default: ''
+
+Conditions:
+  GenerateBucketName: !Equals [!Ref BucketName, '']
+
+Resources:
+  Task:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: toll_booth.tasks.leech.task
+      Role: !ImportValue dev-worker-role-arn
+      Runtime: python3.7
+      Tracing: Active
+      Timeout: 900
+      CodeUri: src/
+      Environment:
+        Variables:
+          ASSET_BUCKET: !Ref AssetBucket
+          GQL_API_KEY: !If [DevDeploy, !Ref DevApiKey, '']
+          SENSITIVES_TABLE_NAME: !Ref SensitivesTableName
+          GRAPH_GQL_ENDPOINT: !Ref DataGqlEndpoint
+  AssetBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !If [
+        GenerateBucketName,
+        !Sub "surgeon-asset-bucket-${AWS::StackName}",
+        !Sub "${BucketName}-${AWS::StackName}"
+      ]
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: 'aws:kms'
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LogBucket
+        LogFilePrefix: s3_logs
+      VersioningConfiguration:
+        Status: Enabled
+  LogBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      AccessControl:  LogDeliveryWrite
+      BucketName: !Join
+        - '-'
+          - !If [
+            GenerateBucketName,
+            !Sub "surgeon-asset-bucket-${AWS::StackName}",
+            !Sub "${BucketName}-${AWS::StackName}"
+          ]
+          - logs
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: 'aws:kms'
+      VersioningConfiguration:
+        Status: Enabled
+
+Outputs:
+  SuregonFunctionArn:
+    Description: "function ARN"
+    Value: !GetAtt Task.Arn
+  AssetBucket:
+    Description: "the asset bucket for the surgeon"
+    Value: !Ref AssetBucket
+  LogBucket:
+    Description: "the bucket logging access to the asset bucket"
+    Value: !Ref LogBucket
