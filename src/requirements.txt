@@ -1,0 +1,6 @@
+moncrief>=2.0.0
+retrying
+requests
+bs4
+lxml
+openpyxl

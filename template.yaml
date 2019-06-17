@@ -7,6 +7,9 @@ Parameters:
    Type: String
    Description: the name to be assigned to the asset bucket, leave blank to generate one
    Default: ''
+ GraphGqlEndpoint:
+   Type: String
+   Description: the endpoint used to interact with the larger data set
 
 Conditions:
   GenerateBucketName: !Equals [!Ref BucketName, '']
@@ -15,7 +18,19 @@ Resources:
   Task:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: toll_booth.tasks.leech.task
+      Handler: toll_booth.tasks.reporting.send_daily_report
+      Role: !GetAtt Worker.Arn
+      Runtime: python3.7
+      Tracing: Active
+      Timeout: 900
+      CodeUri: src/
+      Environment:
+        Variables:
+          ASSET_BUCKET: !Ref AssetBucket
+  QueuedTask:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: toll_booth.handler
       Role: !ImportValue dev-worker-role-arn
       Runtime: python3.7
       Tracing: Active
@@ -24,9 +39,22 @@ Resources:
       Environment:
         Variables:
           ASSET_BUCKET: !Ref AssetBucket
-          GQL_API_KEY: !If [DevDeploy, !Ref DevApiKey, '']
-          SENSITIVES_TABLE_NAME: !Ref SensitivesTableName
-          GRAPH_GQL_ENDPOINT: !Ref DataGqlEndpoint
+          GRAPH_GQL_ENDPOINT: !Ref GraphGqlEndpoint
+      Events:
+        parseDocumentation:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt DocumentationParser.Outputs.QueueArn
+            BatchSize: 10
+            Enabled: true
+  DocumentationParser:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location:
+        ApplicationId: arn:aws:serverlessrepo:us-east-1:726075243133:applications/AlgernonShuckLine
+        SemanticVersion: 0.0.8
+      Parameters:
+        TaskName: 'parse_documentation'
   AssetBucket:
     Type: 'AWS::S3::Bucket'
     Properties:
@@ -50,7 +78,7 @@ Resources:
       AccessControl:  LogDeliveryWrite
       BucketName: !Join
         - '-'
-          - !If [
+        - - !If [
             GenerateBucketName,
             !Sub "surgeon-asset-bucket-${AWS::StackName}",
             !Sub "${BucketName}-${AWS::StackName}"
@@ -62,6 +90,135 @@ Resources:
               SSEAlgorithm: 'aws:kms'
       VersioningConfiguration:
         Status: Enabled
+  Worker:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub "worker-${AWS::StackName}"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - appsync.amazonaws.com
+                - events.amazonaws.com
+                - lambda.amazonaws.com
+            Action: sts:AssumeRole
+  writeXray:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: !Sub "writeXray-${AWS::StackName}"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'xray:PutTraceSegments'
+              - 'xray:PutTelemetryRecords'
+              - 'xray:GetSamplingRules'
+              - 'xray:GetSamplingTargets'
+              - 'xray:GetSamplingStatisticSummaries'
+            Resource: '*'
+      Roles:
+        - !Ref Worker
+  workLogs:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: !Sub "workLogs-${AWS::StackName}"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Resource: '*'
+            Action:
+              - 'logs:*'
+      Roles:
+        - !Ref Worker
+  workS3:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: !Sub "workS3-${AWS::StackName}"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: 's3:*'
+            Resource: !Join
+              - ', '
+              - - !GetAtt AssetBucket.Arn
+                - !GetAtt LogBucket.Arn
+      Roles:
+        - !Ref Worker
+  readSecrets:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: !Sub "readSecrets-${AWS::StackName}"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - 'secretsmanager:GetSecretValue'
+            Resource: '*'
+            Effect: Allow
+      Roles:
+        - !Ref Worker
+  passRole:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: !Sub "passRole-${AWS::StackName}"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: 'iam:PassRole'
+            Resource: '*'
+      Roles:
+        - !Ref Worker
+  sendSesEmail:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: !Sub "sendSesEmail-${AWS::StackName}"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Resource: "*"
+            Action:
+              - 'ses:ListTemplates'
+              - 'ses:ListCustomVerificationEmailTemplates'
+              - 'ses:VerifyEmailIdentity'
+              - 'ses:GetIdentityPolicies'
+              - 'ses:GetSendQuota'
+              - 'ses:DescribeConfigurationSet'
+              - 'ses:ListReceiptFilters'
+              - 'ses:GetIdentityMailFromDomainAttributes'
+              - 'ses:VerifyDomainDkim'
+              - 'ses:VerifyDomainIdentity'
+              - 'ses:SendEmail'
+              - 'ses:ListConfigurationSets'
+              - 'ses:SendTemplatedEmail'
+              - 'ses:SendCustomVerificationEmail'
+              - 'ses:GetIdentityDkimAttributes'
+              - 'ses:UpdateTemplate'
+              - 'ses:DescribeReceiptRuleSet'
+              - 'ses:ListReceiptRuleSets'
+              - 'ses:GetTemplate'
+              - 'ses:ListIdentities'
+              - 'ses:VerifyEmailAddress'
+              - 'ses:GetCustomVerificationEmailTemplate'
+              - 'ses:SendRawEmail'
+              - 'ses:GetSendStatistics'
+              - 'ses:SendBounce'
+              - 'ses:GetIdentityVerificationAttributes'
+              - 'ses:GetIdentityNotificationAttributes'
+              - 'ses:ListIdentityPolicies'
+              - 'ses:DescribeReceiptRule'
+              - 'ses:DescribeActiveReceiptRuleSet'
+              - 'ses:GetAccountSendingEnabled'
+              - 'ses:SendBulkTemplatedEmail'
+              - 'ses:ListVerifiedEmailAddresses'
+      Roles:
+        - !Ref Worker
 
 Outputs:
   SuregonFunctionArn:

@@ -1,4 +1,5 @@
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from algernon import AlgObject
@@ -39,7 +40,7 @@ class ObjectDownloadLink(AlgObject):
         return True
 
     def __str__(self):
-        client = boto3.client('s3')
+        client = boto3.client('s3', config=Config(signature_version='s3v4'))
         if not self._stored:
             self._store()
         pre_signed = client.generate_presigned_url(

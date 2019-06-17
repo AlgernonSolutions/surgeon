@@ -12,7 +12,9 @@ class StaticAsset:
         bucket_name = kwargs.get('bucket_name')
         folder_name = kwargs.get('folder_name')
         if not bucket_name:
-            bucket_name = os.getenv('ASSET_BUCKET', 'algernonsolutions-leech')
+            bucket_name = os.getenv('ASSET_BUCKET')
+            if bucket_name is None:
+                raise RuntimeError(f'could not establish location of asset_bucket')
         if not folder_name:
             folder_name = os.getenv('ASSET_FOLDER', 'statics')
         self._asset_name = asset_name

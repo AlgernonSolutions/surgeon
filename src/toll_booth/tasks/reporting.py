@@ -1,13 +1,12 @@
 from algernon.aws import lambda_logged
-from algernon import ajson
 from aws_xray_sdk.core import xray_recorder
 
 from toll_booth.tasks import credible_fe_tasks
 
 
-@xray_recorder.capture('surgeon_handler')
+@xray_recorder.capture('send_daily_report')
 @lambda_logged
-def handler(event, context):
+def send_daily_report(event, context):
     tasks = [
         credible_fe_tasks.get_productivity_report_data,
         credible_fe_tasks.build_clinical_teams,
@@ -18,6 +17,5 @@ def handler(event, context):
     ]
     for task in tasks:
         task_data = task(**event)
-        task_results = task_data.data_string
-        event.update(task_results)
-    return ajson.dumps(event)
+        event.update(task_data)
+    return True
